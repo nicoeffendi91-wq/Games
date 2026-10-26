@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ludo Sederhana</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  :root { --sky: #87ceeb; --sky-dark: #3aa3d6; --sky-ink: #0b3c5d; }
+  body { background: #ffffff; color: #1f2d3a; min-height: 100vh; }
+  h1 { color: var(--sky-dark); font-weight: 700; }
+  #board { width: 100%; max-width: 600px; height: auto; border: 4px solid var(--sky); border-radius: 8px; background: #fff; display: block; }
+  .panel { background: #fff; border: 2px solid var(--sky); border-radius: 10px; }
+  .btn-sky { background: var(--sky); border-color: var(--sky); color: var(--sky-ink); font-weight: 600; }
+  .btn-sky:hover, .btn-sky:focus { background: var(--sky-dark); border-color: var(--sky-dark); color: #fff; }
+  .btn-sky:disabled { background: #cfe9f5; border-color: #cfe9f5; color: #7a95a6; }
+  #dice { background: #fff; border: 3px solid var(--sky); border-radius: 14px; }
+  .badge-turn { color: #fff; font-size: 1rem; }
+  .score-chip { border: 2px solid; border-radius: 20px; padding: 2px 10px; font-size: .85rem; font-weight: 600; }
+  #log { max-height: 150px; overflow-y: auto; font-size: .85rem; }
+  #log li { border-color: #e3f3fa; }
+  .form-check-input:checked { background-color: var(--sky-dark); border-color: var(--sky-dark); }
+  .form-select:focus { border-color: var(--sky-dark); box-shadow: 0 0 0 .2rem rgba(135,206,235,.4); }
+</style>
+</head>
+<body>
+<div class="container py-4">
+  <h1 class="h2 text-center mb-4">Ludo</h1>
+  <div class="row justify-content-center g-4">
+    <div class="col-12 col-lg-auto">
+      <canvas id="board" width="600" height="600"></canvas>
+    </div>
+    <div class="col-12 col-lg-4 col-xl-3">
+      <div class="panel p-3 mb-3">
+        <label for="playerCount" class="form-label fw-semibold">Jumlah pemain</label>
+        <select id="playerCount" class="form-select mb-2">
+          <option value="2">2 pemain</option>
+          <option value="3">3 pemain</option>
+          <option value="4" selected>4 pemain</option>
+        </select>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="vsCom" checked>
+          <label class="form-check-label" for="vsCom">Lawan komputer (Anda: Merah)</label>
+        </div>
+        <button id="startBtn" class="btn btn-sky w-100">Mulai game</button>
+      </div>
+
+      <div class="panel p-3 mb-3 text-center">
+        <div class="mb-2"><span id="turnBadge" class="badge badge-turn bg-secondary">Belum mulai</span></div>
+        <canvas id="dice" width="84" height="84" class="mb-2"></canvas>
+        <div class="d-grid mb-2">
+          <button id="rollBtn" class="btn btn-sky" disabled>Lempar dadu</button>
+        </div>
+        <div id="status" class="small text-secondary" style="min-height:2.6em">Pilih jumlah pemain lalu tekan Mulai.</div>
+      </div>
+
+      <div id="scores" class="d-flex flex-wrap gap-2 mb-3"></div>
+
+      <div class="panel p-2 mb-3">
+        <ul id="log" class="list-group list-group-flush"></ul>
+      </div>
+
+      <div class="panel p-3 small">
+        <div class="fw-semibold mb-1">Aturan singkat</div>
+        <div>• Angka 6 untuk mengeluarkan bidak dari kandang.</div>
+        <div>• Angka 6, makan bidak lawan, atau bidak sampai tujuan memberi giliran tambahan.</div>
+        <div>• Petak berwarna dan bintang aman dari dimakan.</div>
+        <div>• Tiga angka 6 beruntun menghanguskan giliran.</div>
+        <div>• Pemenang: yang pertama memasukkan 4 bidak ke tengah.</div>
+        <div class="mt-1">Spasi = lempar dadu.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="winModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered modal-sm">
+    <div class="modal-content text-center" style="border:3px solid #87ceeb">
+      <div class="modal-body p-4">
+        <h2 class="h4 mb-2">Pemenang</h2>
+        <p class="h3 mb-3" id="winnerName"></p>
+        <button class="btn btn-sky" id="againBtn" data-bs-dismiss="modal">Main lagi</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+/* ================= Konstanta & jalur papan ================= */
+const U = 40; // ukuran satu petak (px)
+const COLORS = ['#e53935', '#43a047', '#fdd835', '#1e88e5']; // Merah, Hijau, Kuning, Biru
+const LIGHT  = ['#fde0df', '#dcefdd', '#fff7c2', '#d6e8fa'];
+const NAMES  = ['Merah', 'Hijau', 'Kuning', 'Biru'];
+const SKY = '#87ceeb', SKY_D = '#3aa3d6';
+const START = [0, 13, 26, 39];                       // indeks awal tiap pemain di jalur utama
+const SAFE_ABS = new Set([0, 13, 26, 39, 8, 21, 34, 47]);
+const STARS = [8, 21, 34, 47];
+const BASE_ORIGIN = [[0, 0], [9, 0], [9, 9], [0, 9]];
+const BASE_SPOT = [[2, 2], [4, 2], [2, 4], [4, 4]];
+
+const TRACK = [];
+const add = (c, r) => TRACK.push([c, r]);
+for (let c = 1; c <= 5; c++) add(c, 6);
+for (let r = 5; r >= 0; r--) add(6, r);
+add(7, 0); add(8, 0);
+for (let r = 1; r <= 5; r++) add(8, r);
+for (let c = 9; c <= 14; c++) add(c, 6);
+add(14, 7); add(14, 8);
+for (let c = 13; c >= 9; c--) add(c, 8);
+for (let r = 9; r <= 14; r++) add(8, r);
+add(7, 14); add(6, 14);
+for (let r = 13; r >= 9; r--) add(6, r);
+for (let c = 5; c >= 0; c--) add(c, 8);
+add(0, 7); add(0, 6);
+
+const HOME_COL = [
+  [1, 2, 3, 4, 5].map(c => [c, 7]),
+  [1, 2, 3, 4, 5].map(r => [7, r]),
+  [13, 12, 11, 10, 9].map(c => [c, 7]),
+  [13, 12, 11, 10, 9].map(r => [7, r])
+];
+const GOAL = [[6.55, 7.5], [7.5, 6.55], [8.45, 7.5], [7.5, 8.45]];
+
+/* ================= State ================= */
+const state = {
+  gid: 0, running: false, players: [], bots: [],
+  tokens: [[-1,-1,-1,-1],[-1,-1,-1,-1],[-1,-1,-1,-1],[-1,-1,-1,-1]],
+  turn: 0, dice: 0, phase: 'idle', sixes: 0, movable: []
+};
+let hits = [];
+
+const canvas = document.getElementById('board');
+const ctx = canvas.getContext('2d');
+const diceCv = document.getElementById('dice');
+const dctx = diceCv.getContext('2d');
+const rollBtn = document.getElementById('rollBtn');
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const isBot = pl => state.bots.includes(pl);
+const absIdx = (pl, p) => (START[pl] + p) % 52;
+
+/* ================= Posisi bidak ================= */
+function posOf(pl, i) {
+  const p = state.tokens[pl][i];
+  if (p < 0) {
+    const o = BASE_ORIGIN[pl], s = BASE_SPOT[i];
+    return [o[0] + s[0], o[1] + s[1]];
+  }
+  if (p <= 50) { const t = TRACK[absIdx(pl, p)]; return [t[0] + .5, t[1] + .5]; }
+  if (p <= 55) { const t = HOME_COL[pl][p - 51]; return [t[0] + .5, t[1] + .5]; }
+  const g = GOAL[pl], off = (i - 1.5) * 0.13;
+  return (pl % 2 === 0) ? [g[0], g[1] + off] : [g[0] + off, g[1]];
+}
+
+/* ================= Menggambar papan ================= */
+function drawBoard(t) {
+  ctx.clearRect(0, 0, 600, 600);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, 600, 600);
+
+  // kandang
+  for (let pl = 0; pl < 4; pl++) {
+    const [ox, oy] = BASE_ORIGIN[pl];
+    const joined = !state.running || state.players.includes(pl);
+    ctx.globalAlpha = joined ? 1 : 0.3;
+    ctx.fillStyle = COLORS[pl];
+    ctx.fillRect(ox * U, oy * U, 6 * U, 6 * U);
+    ctx.fillStyle = '#fff';
+    roundRect(ctx, (ox + 1) * U, (oy + 1) * U, 4 * U, 4 * U, 14);
+    ctx.fill();
+    BASE_SPOT.forEach(s => {
+      ctx.beginPath();
+      ctx.arc((ox + s[0]) * U, (oy + s[1]) * U, 0.42 * U, 0, Math.PI * 2);
+      ctx.fillStyle = LIGHT[pl]; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = COLORS[pl]; ctx.stroke();
+    });
+    ctx.globalAlpha = 1;
+    if (state.running && state.turn === pl) {
+      ctx.strokeStyle = SKY_D; ctx.lineWidth = 6;
+      ctx.strokeRect(ox * U + 3, oy * U + 3, 6 * U - 6, 6 * U - 6);
+    }
+  }
+
+  // petak jalur silang
+  for (let r = 0; r < 15; r++) for (let c = 0; c < 15; c++) {
+    const inCross = (c >= 6 && c <= 8) || (r >= 6 && r <= 8);
+    const inCenter = c >= 6 && c <= 8 && r >= 6 && r <= 8;
+    if (!inCross || inCenter) continue;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(c * U, r * U, U, U);
+    ctx.strokeStyle = SKY; ctx.lineWidth = 1.5;
+    ctx.strokeRect(c * U, r * U, U, U);
+  }
+  // kolom tujuan & petak start berwarna
+  for (let pl = 0; pl < 4; pl++) {
+    ctx.fillStyle = COLORS[pl];
+    HOME_COL[pl].forEach(([c, r]) => { ctx.fillRect(c * U, r * U, U, U); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(c * U, r * U, U, U); });
+    const [sc, sr] = TRACK[START[pl]];
+    ctx.fillRect(sc * U, sr * U, U, U);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.strokeRect(sc * U, sr * U, U, U);
+  }
+  // bintang
+  ctx.fillStyle = SKY_D; ctx.font = '24px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  STARS.forEach(a => { const [c, r] = TRACK[a]; ctx.fillText('★', c * U + U / 2, r * U + U / 2 + 1); });
+
+  // segitiga tengah
+  const tri = (pts, color) => {
+    ctx.beginPath(); ctx.moveTo(pts[0][0] * U, pts[0][1] * U);
+    pts.slice(1).forEach(p => ctx.lineTo(p[0] * U, p[1] * U));
+    ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+  };
+  tri([[6, 6], [6, 9], [7.5, 7.5]], COLORS[0]);
+  tri([[6, 6], [9, 6], [7.5, 7.5]], COLORS[1]);
+  tri([[9, 6], [9, 9], [7.5, 7.5]], COLORS[2]);
+  tri([[6, 9], [9, 9], [7.5, 7.5]], COLORS[3]);
+
+  // bingkai
+  ctx.strokeStyle = SKY; ctx.lineWidth = 3;
+  ctx.strokeRect(1.5, 1.5, 597, 597);
+
+  drawTokens(t);
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+
+function drawTokens(t) {
+  hits = [];
+  const groups = {};
+  const list = [];
+  for (let pl = 0; pl < 4; pl++) for (let i = 0; i < 4; i++) {
+    const [x, y] = posOf(pl, i);
+    const e = { pl, i, x, y };
+    list.push(e);
+    const key = x.toFixed(2) + ',' + y.toFixed(2);
+    (groups[key] = groups[key] || []).push(e);
+  }
+  list.forEach(e => {
+    const g = groups[e.x.toFixed(2) + ',' + e.y.toFixed(2)];
+    const n = g.length;
+    const isBase = state.tokens[e.pl][e.i] === -1;
+    let dx = 0, dy = 0, r = 0.36;
+    if (n > 1 && !isBase) {
+      const k = g.indexOf(e);
+      dx = (k - (n - 1) / 2) * 0.24; dy = ((k % 2) - 0.5) * 0.12; r = 0.27;
+    }
+    e.dx = e.x + dx; e.dy = e.y + dy; e.r = r;
+  });
+  list.sort((a, b) => a.dy - b.dy).forEach(e => {
+    const px = e.dx * U, py = e.dy * U, rad = e.r * U;
+    const canMove = state.phase === 'choose' && state.turn === e.pl && state.movable.includes(e.i);
+    if (canMove) {
+      const pulse = 4 + 3 * Math.sin(t / 140);
+      ctx.beginPath(); ctx.arc(px, py, rad + pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = SKY_D; ctx.lineWidth = 3.5; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(px, py, rad, 0, Math.PI * 2);
+    ctx.fillStyle = COLORS[e.pl]; ctx.fill();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = 'rgba(0,0,0,.5)'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(px - rad * .3, py - rad * .3, rad * .3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.45)'; ctx.fill();
+    hits.push({ pl: e.pl, i: e.i, x: px, y: py, r: rad + 8 });
+  });
+}
+
+function loop(t) { drawBoard(t); requestAnimationFrame(loop); }
+
+/* ================= Dadu ================= */
+const PIPS = {
+  1: [[.5, .5]], 2: [[.25, .25], [.75, .75]], 3: [[.25, .25], [.5, .5], [.75, .75]],
+  4: [[.25, .25], [.75, .25], [.25, .75], [.75, .75]],
+  5: [[.25, .25], [.75, .25], [.5, .5], [.25, .75], [.75, .75]],
+  6: [[.25, .22], [.75, .22], [.25, .5], [.75, .5], [.25, .78], [.75, .78]]
+};
+function drawDice(v) {
+  const s = diceCv.width;
+  dctx.clearRect(0, 0, s, s);
+  dctx.fillStyle = '#fff';
+  roundRect(dctx, 4, 4, s - 8, s - 8, 12); dctx.fill();
+  if (!v) return;
+  const col = state.running ? COLORS[state.turn] : '#1f2d3a';
+  dctx.fillStyle = col;
+  PIPS[v].forEach(([x, y]) => { dctx.beginPath(); dctx.arc(x * s, y * s, 7, 0, Math.PI * 2); dctx.fill(); });
+}
+
+/* ================= Antarmuka ================= */
+function log(msg) {
+  const ul = document.getElementById('log');
+  const li = document.createElement('li');
+  li.className = 'list-group-item px-2 py-1';
+  li.textContent = msg;
+  ul.prepend(li);
+  while (ul.children.length > 30) ul.removeChild(ul.lastChild);
+}
+function setStatus(t) { document.getElementById('status').textContent = t; }
+
+function updateUI() {
+  const badge = document.getElementById('turnBadge');
+  if (state.running) {
+    badge.textContent = 'Giliran: ' + NAMES[state.turn] + (isBot(state.turn) ? ' (komputer)' : '');
+    badge.style.background = COLORS[state.turn];
+    badge.style.color = state.turn === 2 ? '#3a3200' : '#fff';
+  } else {
+    badge.textContent = 'Belum mulai'; badge.style.background = '#6c757d'; badge.style.color = '#fff';
+  }
+  rollBtn.disabled = !(state.running && state.phase === 'roll' && !isBot(state.turn));
+  const sc = document.getElementById('scores');
+  sc.innerHTML = '';
+  state.players.forEach(pl => {
+    const done = state.tokens[pl].filter(p => p === 56).length;
+    const chip = document.createElement('span');
+    chip.className = 'score-chip';
+    chip.style.borderColor = COLORS[pl];
+    chip.textContent = NAMES[pl] + ' ' + done + '/4';
+    sc.appendChild(chip);
+  });
+}
+
+/* ================= Logika permainan ================= */
+function movableOf(pl, d) {
+  const r = [];
+  for (let i = 0; i < 4; i++) {
+    const p = state.tokens[pl][i];
+    if (p === -1) { if (d === 6) r.push(i); }
+    else if (p + d <= 56) r.push(i);
+  }
+  return r;
+}
+function distinctOpts(pl, mv) {
+  let baseSeen = false;
+  return mv.filter(i => {
+    if (state.tokens[pl][i] === -1) { if (baseSeen) return false; baseSeen = true; }
+    return true;
+  });
+}
+function wouldCapture(pl, np) {
+  if (np < 0 || np > 50) return false;
+  const a = absIdx(pl, np);
+  if (SAFE_ABS.has(a)) return false;
+  return state.players.some(q => q !== pl && state.tokens[q].some(tp => tp >= 0 && tp <= 50 && absIdx(q, tp) === a));
+}
+function botPick(pl, d, opts) {
+  let best = opts[0], bestScore = -1;
+  opts.forEach(i => {
+    const p = state.tokens[pl][i];
+    const np = p === -1 ? 0 : p + d;
+    let s = np * 0.5;
+    if (np === 56) s += 100;
+    if (wouldCapture(pl, np)) s += 80;
+    if (p === -1) s += 50;
+    if (np >= 51 && np < 56) s += 30;
+    if (np <= 50 && SAFE_ABS.has(absIdx(pl, np))) s += 20;
+    if (p >= 0 && p <= 50 && !SAFE_ABS.has(absIdx(pl, p))) s += 8; // keluar dari petak rawan
+    s += Math.random();
+    if (s > bestScore) { bestScore = s; best = i; }
+  });
+  return best;
+}
+
+function nextTurn() {
+  const ps = state.players;
+  state.turn = ps[(ps.indexOf(state.turn) + 1) % ps.length];
+  state.sixes = 0;
+  beginTurn();
+}
+function beginTurn() {
+  state.phase = 'roll'; state.movable = []; state.dice = 0;
+  drawDice(0);
+  updateUI();
+  if (isBot(state.turn)) {
+    setStatus(NAMES[state.turn] + ' (komputer) sedang bermain...');
+    const gid = state.gid;
+    setTimeout(() => { if (gid === state.gid) rollDice(); }, 800);
+  } else {
+    setStatus(NAMES[state.turn] + ': tekan "Lempar dadu".');
+  }
+}
+
+async function rollDice() {
+  if (state.phase !== 'roll' || !state.running) return;
+  const gid = state.gid, pl = state.turn;
+  state.phase = 'rolling'; updateUI();
+  for (let k = 0; k < 8; k++) { drawDice(1 + Math.floor(Math.random() * 6)); await sleep(70); }
+  if (gid !== state.gid) return;
+  const d = 1 + Math.floor(Math.random() * 6);
+  state.dice = d; drawDice(d);
+  log(NAMES[pl] + ' mendapat ' + d);
+  state.sixes = d === 6 ? state.sixes + 1 : 0;
+
+  if (state.sixes === 3) {
+    setStatus('Tiga angka 6 beruntun. Giliran hangus.');
+    log(NAMES[pl] + ': tiga angka 6, giliran hangus');
+    await sleep(1000); if (gid !== state.gid) return;
+    return nextTurn();
+  }
+  const mv = movableOf(pl, d);
+  if (!mv.length) {
+    setStatus(NAMES[pl] + ' tidak bisa menjalankan bidak.');
+    await sleep(1000); if (gid !== state.gid) return;
+    return nextTurn();
+  }
+  const opts = distinctOpts(pl, mv);
+  if (opts.length === 1) {
+    await sleep(400); if (gid !== state.gid) return;
+    return doMove(pl, opts[0]);
+  }
+  if (isBot(pl)) {
+    await sleep(600); if (gid !== state.gid) return;
+    return doMove(pl, botPick(pl, d, opts));
+  }
+  state.movable = mv; state.phase = 'choose';
+  setStatus('Pilih bidak yang akan dijalankan.');
+  updateUI();
+}
+
+async function doMove(pl, i) {
+  const gid = state.gid, d = state.dice;
+  state.phase = 'moving'; state.movable = []; updateUI();
+  if (state.tokens[pl][i] === -1) {
+    state.tokens[pl][i] = 0;
+    await sleep(300);
+  } else {
+    for (let s = 0; s < d; s++) {
+      state.tokens[pl][i]++;
+      await sleep(170);
+      if (gid !== state.gid) return;
+    }
+  }
+  if (gid !== state.gid) return;
+
+  const p = state.tokens[pl][i];
+  let captured = false;
+  if (p >= 0 && p <= 50) {
+    const a = absIdx(pl, p);
+    if (!SAFE_ABS.has(a)) {
+      state.players.forEach(q => {
+        if (q === pl) return;
+        for (let j = 0; j < 4; j++) {
+          const tp = state.tokens[q][j];
+          if (tp >= 0 && tp <= 50 && absIdx(q, tp) === a) {
+            state.tokens[q][j] = -1; captured = true;
+            log(NAMES[pl] + ' memakan bidak ' + NAMES[q]);
+          }
+        }
+      });
+    }
+  }
+  const reached = p === 56;
+  if (reached) log(NAMES[pl] + ' memasukkan satu bidak ke tengah');
+  updateUI();
+
+  if (state.tokens[pl].every(x => x === 56)) return finish(pl);
+
+  if (d === 6 || captured || reached) {
+    setStatus(NAMES[pl] + ' mendapat giliran tambahan.');
+    await sleep(700); if (gid !== state.gid) return;
+    beginTurn();
+  } else {
+    await sleep(250); if (gid !== state.gid) return;
+    nextTurn();
+  }
+}
+
+function finish(pl) {
+  state.running = false; state.phase = 'idle';
+  updateUI();
+  setStatus(NAMES[pl] + ' menang.');
+  log('Pemenang: ' + NAMES[pl]);
+  const w = document.getElementById('winnerName');
+  w.textContent = NAMES[pl];
+  w.style.color = pl === 2 ? '#b89b00' : COLORS[pl];
+  new bootstrap.Modal(document.getElementById('winModal')).show();
+}
+
+function startGame() {
+  const n = +document.getElementById('playerCount').value;
+  const vsCom = document.getElementById('vsCom').checked;
+  state.gid++;
+  state.players = n === 2 ? [0, 2] : n === 3 ? [0, 1, 2] : [0, 1, 2, 3];
+  state.bots = vsCom ? state.players.slice(1) : [];
+  state.tokens = [[-1,-1,-1,-1],[-1,-1,-1,-1],[-1,-1,-1,-1],[-1,-1,-1,-1]];
+  state.turn = state.players[0]; state.sixes = 0; state.running = true;
+  document.getElementById('log').innerHTML = '';
+  document.getElementById('startBtn').textContent = 'Ulangi game';
+  log('Game dimulai: ' + state.players.map(p => NAMES[p]).join(', '));
+  beginTurn();
+}
+
+/* ================= Event ================= */
+canvas.addEventListener('click', e => {
+  if (state.phase !== 'choose' || isBot(state.turn)) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = canvas.width / rect.width;
+  const x = (e.clientX - rect.left) * sx, y = (e.clientY - rect.top) * sx;
+  let best = null, bd = Infinity;
+  hits.forEach(h => {
+    if (h.pl !== state.turn || !state.movable.includes(h.i)) return;
+    const dd = Math.hypot(h.x - x, h.y - y);
+    if (dd <= h.r && dd < bd) { bd = dd; best = h; }
+  });
+  if (best) doMove(state.turn, best.i);
+});
+canvas.addEventListener('mousemove', e => {
+  if (state.phase !== 'choose') { canvas.style.cursor = 'default'; return; }
+  const rect = canvas.getBoundingClientRect();
+  const sx = canvas.width / rect.width;
+  const x = (e.clientX - rect.left) * sx, y = (e.clientY - rect.top) * sx;
+  const over = hits.some(h => h.pl === state.turn && state.movable.includes(h.i) && Math.hypot(h.x - x, h.y - y) <= h.r);
+  canvas.style.cursor = over ? 'pointer' : 'default';
+});
+rollBtn.addEventListener('click', () => { if (!isBot(state.turn)) rollDice(); });
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && !rollBtn.disabled && !['SELECT', 'INPUT', 'BUTTON'].includes(document.activeElement.tagName)) {
+    e.preventDefault(); rollDice();
+  }
+});
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('againBtn').addEventListener('click', startGame);
+
+drawDice(0);
+updateUI();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
