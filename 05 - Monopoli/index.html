@@ -141,7 +141,7 @@ const SQ = [
   prop('Bandung','yellow',260,22),
   prop('Bogor','yellow',260,22),
   util('PDAM','💧'),
-  prop('Depok','yellow',280,24),
+  prop('Blitar','yellow',280,24),
   {type:'gotojail', name:'Masuk Penjara'},
   prop('Tangerang','green',300,26),
   prop('Bekasi','green',300,26),
@@ -151,7 +151,7 @@ const SQ = [
   {type:'chance', name:'Kesempatan'},
   prop('Jakarta Pusat','darkblue',350,35),
   {type:'tax', name:'Pajak Mewah', amount:100},
-  prop('Bundaran HI','darkblue',400,50),
+  prop('Tulungagung','darkblue',400,50),
 ];
 const resetBoard = () => SQ.forEach(s => { s.owner = null; s.houses = 0; s.mort = false; });
 resetBoard();
@@ -566,7 +566,7 @@ function buildDecks() {
 
   G.chance = shuffle([
     mk('Maju ke MULAI. Terima Rp200.000.', p => go(p, 0)),
-    mk('Maju ke Bundaran HI.', p => go(p, 39)),
+    mk('Maju ke Tulungagung.', p => go(p, 39)),
     mk('Maju ke Makassar. Jika melewati MULAI, terima Rp200.000.', p => go(p, 21)),
     mk('Maju ke Yogyakarta. Jika melewati MULAI, terima Rp200.000.', p => go(p, 13)),
     mk('Maju ke stasiun terdekat. Jika dimiliki pemain lain, bayar sewa 2×.', async p => { await moveTo(p, nearest(p, [5,15,25,35])); await landOn(p, G.lastDice || 7, {rentMult:2}); }),
