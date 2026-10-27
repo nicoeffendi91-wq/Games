@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monopoli Nusantara</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<style>
+  body{background:radial-gradient(circle at top,#2e7d4f,#12361f);min-height:100vh;color:#222}
+  canvas{width:100%;max-width:704px;height:auto;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5);background:#cfe8d0;cursor:pointer;touch-action:manipulation}
+  .panel-card{background:#f8f5ea;border-radius:12px;padding:12px;margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
+  .pl{border:2px solid transparent;border-radius:10px;padding:6px 10px;background:#fff;margin-bottom:6px;font-size:.9rem}
+  .pl.active{border-color:#f4a300;box-shadow:0 0 0 2px rgba(244,163,0,.35)}
+  .pl.dead{opacity:.45;text-decoration:line-through}
+  .dot{display:inline-block;width:12px;height:12px;border-radius:50%;margin-right:6px;vertical-align:middle;border:1px solid rgba(0,0,0,.4)}
+  .chip{display:inline-block;width:14px;height:10px;border-radius:2px;margin:3px 2px 0 0;border:1px solid rgba(0,0,0,.45)}
+  .chip.m{opacity:.3}
+  #log{height:190px;overflow:auto;font-size:.8rem;background:#fff;border-radius:8px;padding:6px 8px}
+  #log div{border-bottom:1px dotted #ddd;padding:1px 0}
+  .pband{height:26px;border-radius:6px 6px 0 0;border:1px solid rgba(0,0,0,.3)}
+  #info{font-size:.85rem;min-height:120px}
+  .brand{font-weight:800;letter-spacing:1px}
+  .ctrl .btn{font-weight:600}
+</style>
+</head>
+<body>
+<nav class="navbar navbar-dark bg-dark">
+  <div class="container-fluid">
+    <span class="navbar-brand brand">🎩 MONOPOLI NUSANTARA</span>
+    <button id="btnNew" class="btn btn-outline-light btn-sm">Permainan Baru</button>
+  </div>
+</nav>
+
+<main class="container-fluid py-3">
+  <div class="row g-3 justify-content-center">
+    <div class="col-lg-7 d-flex justify-content-center align-items-start">
+      <canvas id="board" width="704" height="704"></canvas>
+    </div>
+    <div class="col-lg-5" style="max-width:580px">
+      <div class="panel-card">
+        <div id="status" class="fw-bold mb-2">Siapkan permainan…</div>
+        <div class="ctrl d-flex flex-wrap gap-2">
+          <button id="btnRoll" class="btn btn-primary" disabled>🎲 Lempar Dadu</button>
+          <button id="btnPay" class="btn btn-warning d-none">Bayar Rp50.000 (keluar penjara)</button>
+          <button id="btnCard" class="btn btn-info d-none">Pakai Kartu Bebas</button>
+          <button id="btnProps" class="btn btn-outline-dark" disabled>🏠 Properti</button>
+          <button id="btnEnd" class="btn btn-success" disabled>Akhiri Giliran ➜</button>
+        </div>
+      </div>
+      <div class="panel-card"><div class="fw-bold mb-2">Pemain</div><div id="players"></div></div>
+      <div class="panel-card"><div class="fw-bold mb-2">Info Petak <span class="text-muted small fw-normal">(klik petak di papan)</span></div><div id="info" class="text-muted">Klik sebuah petak untuk melihat detailnya.</div></div>
+      <div class="panel-card"><div class="fw-bold mb-2">Catatan Permainan</div><div id="log"></div></div>
+    </div>
+  </div>
+</main>
+
+<!-- Setup -->
+<div class="modal fade" id="setupModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title">🎲 Monopoli Nusantara</h5></div>
+    <div class="modal-body">
+      <p class="text-muted small mb-3">Atur pemain (2–4). Semua mulai dengan Rp1.500.000. Pemain terakhir yang tidak bangkrut menang.</p>
+      <div id="setupRows"></div>
+      <div id="setupErr" class="text-danger small mt-2"></div>
+    </div>
+    <div class="modal-footer"><button id="btnStart" class="btn btn-success">Mulai Permainan</button></div>
+  </div></div>
+</div>
+
+<!-- Generic dialog -->
+<div class="modal fade" id="dlg" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+    <div class="modal-header"><h5 class="modal-title" id="dlgTitle"></h5></div>
+    <div class="modal-body" id="dlgBody"></div>
+    <div class="modal-footer" id="dlgFoot"></div>
+  </div></div>
+</div>
+
+<!-- Property manager -->
+<div class="modal fade" id="propModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">
+    <div class="modal-header">
+      <h5 class="modal-title">Properti <span id="propWho"></span> <small id="propCash" class="text-success"></small></h5>
+      <button class="btn-close" data-bs-dismiss="modal"></button>
+    </div>
+    <div class="modal-body" id="propBody"></div>
+  </div></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(() => {
+'use strict';
+
+/* ================= Util ================= */
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fmt = n => "Rp" + Math.round(n * 1000).toLocaleString("id-ID");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const r6 = () => 1 + Math.floor(Math.random() * 6);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+const canvas = $('#board'), ctx = canvas.getContext('2d');
+const S = 704, C = 88, W = (S - 2 * C) / 9;
+
+/* ================= Data papan ================= */
+const GC = {brown:'#8B5A2B', lightblue:'#8fd3f4', pink:'#e0489b', orange:'#f7941d', red:'#e3262e', yellow:'#f6e32b', green:'#1fa75a', darkblue:'#1f5fbf'};
+const GH = {brown:50, lightblue:50, pink:100, orange:100, red:150, yellow:150, green:200, darkblue:200};
+const multFor = b => b <= 10 ? [1,5,15,45,80,125] : b <= 28 ? [1,5,15,40,50,60] : [1,4,12,28,34,40];
+const prop = (name, group, price, base) => ({type:'prop', name, group, price, rent: multFor(base).map(m => m * base)});
+const rail = name => ({type:'rail', name, price:200});
+const util = (name, icon) => ({type:'util', name, price:150, icon});
+
+const SQ = [
+  {type:'go', name:'MULAI'},
+  prop('Medan','brown',60,2),
+  {type:'chest', name:'Dana Umum'},
+  prop('Palembang','brown',60,4),
+  {type:'tax', name:'Pajak Penghasilan', amount:200},
+  rail('Stasiun Gambir'),
+  prop('Bandar Lampung','lightblue',100,6),
+  {type:'chance', name:'Kesempatan'},
+  prop('Pontianak','lightblue',100,6),
+  prop('Banjarmasin','lightblue',120,8),
+  {type:'jail', name:'Penjara'},
+  prop('Semarang','pink',140,10),
+  util('PLN','💡'),
+  prop('Yogyakarta','pink',140,10),
+  prop('Solo','pink',160,12),
+  rail('Stasiun Bandung'),
+  prop('Surabaya','orange',180,14),
+  {type:'chest', name:'Dana Umum'},
+  prop('Malang','orange',180,14),
+  prop('Denpasar','orange',200,16),
+  {type:'free', name:'Parkir Bebas'},
+  prop('Makassar','red',220,18),
+  {type:'chance', name:'Kesempatan'},
+  prop('Manado','red',220,18),
+  prop('Balikpapan','red',240,20),
+  rail('Stasiun Gubeng'),
+  prop('Bandung','yellow',260,22),
+  prop('Bogor','yellow',260,22),
+  util('PDAM','💧'),
+  prop('Depok','yellow',280,24),
+  {type:'gotojail', name:'Masuk Penjara'},
+  prop('Tangerang','green',300,26),
+  prop('Bekasi','green',300,26),
+  {type:'chest', name:'Dana Umum'},
+  prop('Jakarta Selatan','green',320,28),
+  rail('Stasiun Pasar Senen'),
+  {type:'chance', name:'Kesempatan'},
+  prop('Jakarta Pusat','darkblue',350,35),
+  {type:'tax', name:'Pajak Mewah', amount:100},
+  prop('Bundaran HI','darkblue',400,50),
+];
+const resetBoard = () => SQ.forEach(s => { s.owner = null; s.houses = 0; s.mort = false; });
+resetBoard();
+
+const PCOL = ['#e63946', '#1d7ed6', '#2a9d3f', '#f4a300'];
+const groupOf = g => SQ.filter(s => s.group === g);
+const ownsAll = (p, g) => groupOf(g).every(s => s.owner === p);
+const countOwned = (p, type) => SQ.filter(s => s.owner === p && s.type === type).length;
+const worth = p => p.cash + SQ.filter(s => s.owner === p).reduce((a, s) => a + (s.mort ? 0 : s.price) + (s.houses || 0) * (GH[s.group] || 0), 0);
+
+/* ================= State ================= */
+let G = null;
+let pending = null;
+const waitFor = () => new Promise(res => { pending = res; });
+const act = a => { if (pending) { const r = pending; pending = null; r(a); } };
+
+function log(msg) {
+  const el = document.createElement('div');
+  el.innerHTML = msg;
+  const box = $('#log');
+  box.appendChild(el);
+  while (box.children.length > 250) box.removeChild(box.firstChild);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ================= Rendering canvas ================= */
+function rectOf(i) {
+  if (i === 0) return {x:S-C, y:S-C, w:C, h:C};
+  if (i === 10) return {x:0, y:S-C, w:C, h:C};
+  if (i === 20) return {x:0, y:0, w:C, h:C};
+  if (i === 30) return {x:S-C, y:0, w:C, h:C};
+  if (i < 10) return {x:S-C-i*W, y:S-C, w:W, h:C};
+  if (i < 20) return {x:0, y:S-C-(i-10)*W, w:C, h:W};
+  if (i < 30) return {x:C+(i-21)*W, y:0, w:W, h:C};
+  return {x:S-C, y:C+(i-31)*W, w:C, h:W};
+}
+function wrap(text, maxW) {
+  const words = text.split(' '), lines = []; let cur = '';
+  for (const w of words) {
+    const t = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(t).width > maxW && cur) { lines.push(cur); cur = w; } else cur = t;
+  }
+  lines.push(cur); return lines;
+}
+function rr(x, y, w, h, r) {
+  ctx.beginPath(); ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+const FONT = '"Segoe UI",Arial,sans-serif';
+
+function drawCorner(i) {
+  const r = rectOf(i), s = SQ[i];
+  ctx.fillStyle = '#fbf7e8'; ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = '#1c2b20'; ctx.lineWidth = 1.2; ctx.strokeRect(r.x, r.y, r.w, r.h);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#111';
+  const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+  if (i === 0) {
+    ctx.font = '30px ' + FONT; ctx.fillText('➜', cx, cy - 18);
+    ctx.font = 'bold 20px ' + FONT; ctx.fillStyle = '#c1121f'; ctx.fillText('MULAI', cx, cy + 8);
+    ctx.font = '10px ' + FONT; ctx.fillStyle = '#111'; ctx.fillText('Terima Rp200.000', cx, cy + 26);
+  } else if (i === 10) {
+    ctx.fillStyle = '#f4a300'; ctx.fillRect(r.x + 4, r.y + 4, 52, 52);
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.strokeRect(r.x + 4, r.y + 4, 52, 52);
+    ctx.fillStyle = '#111'; ctx.font = 'bold 10px ' + FONT; ctx.fillText('PENJARA', r.x + 30, r.y + 30);
+    ctx.font = '9px ' + FONT; ctx.fillText('Hanya', r.x + 72, r.y + 62); ctx.fillText('berkunjung', r.x + 62, r.y + 74);
+  } else if (i === 20) {
+    ctx.font = '30px "Segoe UI Emoji",sans-serif'; ctx.fillText('🚗', cx, cy - 12);
+    ctx.font = 'bold 13px ' + FONT; ctx.fillText('PARKIR', cx, cy + 14); ctx.fillText('BEBAS', cx, cy + 29);
+  } else {
+    ctx.font = '30px "Segoe UI Emoji",sans-serif'; ctx.fillText('👮', cx, cy - 12);
+    ctx.font = 'bold 12px ' + FONT; ctx.fillText('MASUK', cx, cy + 14); ctx.fillText('PENJARA', cx, cy + 29);
+  }
+  if (G && G.sel === i) { ctx.strokeStyle = '#ffb703'; ctx.lineWidth = 4; ctx.strokeRect(r.x + 2, r.y + 2, r.w - 4, r.h - 4); }
+}
+
+function drawSquare(i) {
+  if (i % 10 === 0) return drawCorner(i);
+  const s = SQ[i], r = rectOf(i);
+  const side = i < 10 ? 0 : i < 20 ? 1 : i < 30 ? 2 : 3;
+  const ang = [0, Math.PI / 2, Math.PI, -Math.PI / 2][side];
+  const lw = side % 2 === 0 ? r.w : r.h, lh = C;
+  ctx.save();
+  ctx.translate(r.x + r.w / 2, r.y + r.h / 2); ctx.rotate(ang);
+  const x0 = -lw / 2, y0 = -lh / 2;
+  ctx.fillStyle = '#fbf7e8'; ctx.fillRect(x0, y0, lw, lh);
+  ctx.strokeStyle = '#1c2b20'; ctx.lineWidth = 1.2; ctx.strokeRect(x0, y0, lw, lh);
+  let ty = y0 + 5;
+  if (s.type === 'prop') {
+    ctx.fillStyle = GC[s.group]; ctx.fillRect(x0, y0, lw, 19);
+    ctx.strokeRect(x0, y0, lw, 19);
+    if (s.houses > 0) {
+      if (s.houses === 5) {
+        ctx.fillStyle = '#d00000'; ctx.fillRect(-9, y0 + 3, 18, 13);
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(-9, y0 + 3, 18, 13);
+      } else {
+        const tw = s.houses * 11 - 1;
+        for (let k = 0; k < s.houses; k++) {
+          ctx.fillStyle = '#16a34a'; ctx.fillRect(-tw / 2 + k * 11, y0 + 4, 10, 11);
+          ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.strokeRect(-tw / 2 + k * 11, y0 + 4, 10, 11);
+        }
+      }
+    }
+    ty = y0 + 23;
+  }
+  ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const name = s.name.toUpperCase(); let fs = 9.5;
+  do { ctx.font = `bold ${fs}px ${FONT}`; fs -= 0.5; } while (fs > 6.5 && name.split(' ').some(w => ctx.measureText(w).width > lw - 6));
+  wrap(name, lw - 6).forEach((ln, k) => ctx.fillText(ln, 0, ty + k * 11));
+  const icon = {rail:'🚂', util:s.icon, chance:'❓', chest:'🎁', tax:'💰'}[s.type];
+  if (icon) { ctx.font = '22px "Segoe UI Emoji",sans-serif'; ctx.textBaseline = 'middle'; ctx.fillText(icon, 0, y0 + lh * 0.64); }
+  const price = s.price ? fmt(s.price) : s.amount ? fmt(s.amount) : '';
+  if (price) { ctx.font = `9px ${FONT}`; ctx.textBaseline = 'top'; ctx.fillStyle = '#222'; ctx.fillText(price, 0, y0 + lh - 19); }
+  if (s.owner) {
+    ctx.fillStyle = s.owner.color; ctx.fillRect(x0, y0 + lh - 7, lw, 7);
+    ctx.strokeStyle = '#111'; ctx.lineWidth = 1; ctx.strokeRect(x0, y0 + lh - 7, lw, 7);
+  }
+  if (s.mort) {
+    ctx.fillStyle = 'rgba(60,60,60,.62)'; ctx.fillRect(x0, y0, lw, lh);
+    ctx.fillStyle = '#fff'; ctx.font = `bold 10px ${FONT}`; ctx.textBaseline = 'middle'; ctx.fillText('GADAI', 0, 0);
+  }
+  if (G && G.sel === i) { ctx.strokeStyle = '#ffb703'; ctx.lineWidth = 4; ctx.strokeRect(x0 + 2, y0 + 2, lw - 4, lh - 4); }
+  ctx.restore();
+}
+
+function drawDie(x, y, s, v) {
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+  rr(x, y, s, s, 9); ctx.fill(); ctx.stroke();
+  const P = {1:[4], 2:[0,8], 3:[0,4,8], 4:[0,2,6,8], 5:[0,2,4,6,8], 6:[0,2,3,5,6,8]}[v];
+  ctx.fillStyle = '#111';
+  P.forEach(k => {
+    ctx.beginPath();
+    ctx.arc(x + s * (0.25 + 0.25 * (k % 3)), y + s * (0.25 + 0.25 * Math.floor(k / 3)), s * 0.08, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+function drawCenter() {
+  ctx.save();
+  ctx.translate(S / 2, S / 2 - 80); ctx.rotate(-Math.PI / 16);
+  ctx.fillStyle = '#d6232c'; ctx.fillRect(-190, -36, 380, 72);
+  ctx.strokeStyle = '#fff'; ctx.lineWidth = 3; ctx.strokeRect(-185, -31, 370, 62);
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 46px "Trebuchet MS",sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('MONOPOLI', 0, 3);
+  ctx.restore();
+  const d = G ? G.dice : [1, 1];
+  drawDie(S / 2 - 72, S / 2 + 10, 58, d[0]);
+  drawDie(S / 2 + 14, S / 2 + 10, 58, d[1]);
+  if (G && G.current) {
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = G.current.color; ctx.beginPath(); ctx.arc(S / 2 - 70, S / 2 + 102, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#12361f'; ctx.font = `bold 18px ${FONT}`; ctx.textAlign = 'left';
+    ctx.fillText('Giliran: ' + G.current.name, S / 2 - 54, S / 2 + 103);
+  }
+}
+
+function drawTokens() {
+  if (!G) return;
+  const off = [[-11,-9],[11,-9],[-11,9],[11,9]];
+  G.players.forEach((p, k) => {
+    if (p.bankrupt) return;
+    const r = rectOf(p.pos);
+    let cx = r.x + r.w / 2 + off[k][0], cy = r.y + r.h / 2 + off[k][1];
+    if (p.pos === 10) {
+      if (p.jail) { cx = r.x + 30 + off[k][0] * 0.9; cy = r.y + 36 + off[k][1] * 0.9; }
+      else { cx = r.x + 68 + off[k][0] * 0.5; cy = r.y + 32 + off[k][1] * 0.5 + 18; if (k > 1) cy += 6; }
+    }
+    if (p === G.current) { ctx.beginPath(); ctx.arc(cx, cy, 13, 0, Math.PI * 2); ctx.strokeStyle = '#ffd60a'; ctx.lineWidth = 3; ctx.stroke(); }
+    ctx.beginPath(); ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+    ctx.fillStyle = p.color; ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = `bold 10px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(k + 1, cx, cy + 0.5);
+  });
+}
+
+function draw() {
+  ctx.clearRect(0, 0, S, S);
+  ctx.fillStyle = '#bfe0c4'; ctx.fillRect(0, 0, S, S);
+  for (let i = 0; i < 40; i++) drawSquare(i);
+  drawCenter();
+  drawTokens();
+}
+
+/* ================= Panel UI ================= */
+function infoHtml(i) {
+  const s = SQ[i]; let h = '';
+  if (s.type === 'prop') {
+    h += `<div class="pband" style="background:${GC[s.group]}"></div><div class="fw-bold fs-5 text-center">${s.name}</div>
+    <table class="table table-sm mb-1 small"><tbody>
+    <tr><td>Harga</td><td class="text-end">${fmt(s.price)}</td></tr>
+    <tr><td>Sewa</td><td class="text-end">${fmt(s.rent[0])}</td></tr>
+    <tr><td>Sewa jika punya seluruh warna</td><td class="text-end">${fmt(s.rent[0] * 2)}</td></tr>`;
+    for (let n = 1; n <= 4; n++) h += `<tr><td>Dengan ${n} rumah</td><td class="text-end">${fmt(s.rent[n])}</td></tr>`;
+    h += `<tr><td>Dengan hotel</td><td class="text-end">${fmt(s.rent[5])}</td></tr>
+    <tr><td>Harga bangun (per rumah)</td><td class="text-end">${fmt(GH[s.group])}</td></tr>
+    <tr><td>Nilai gadai</td><td class="text-end">${fmt(s.price / 2)}</td></tr></tbody></table>`;
+  } else if (s.type === 'rail') {
+    h += `<div class="fw-bold fs-5 text-center">🚂 ${s.name}</div><table class="table table-sm mb-1 small"><tbody>
+    <tr><td>Harga</td><td class="text-end">${fmt(200)}</td></tr>
+    <tr><td>Punya 1 stasiun</td><td class="text-end">Rp25.000</td></tr><tr><td>Punya 2</td><td class="text-end">Rp50.000</td></tr>
+    <tr><td>Punya 3</td><td class="text-end">Rp100.000</td></tr><tr><td>Punya 4</td><td class="text-end">Rp200.000</td></tr>
+    <tr><td>Nilai gadai</td><td class="text-end">Rp100.000</td></tr></tbody></table>`;
+  } else if (s.type === 'util') {
+    h += `<div class="fw-bold fs-5 text-center">${s.icon} ${s.name}</div><table class="table table-sm mb-1 small"><tbody>
+    <tr><td>Harga</td><td class="text-end">${fmt(150)}</td></tr>
+    <tr><td>Punya 1 utilitas</td><td class="text-end">4× dadu</td></tr>
+    <tr><td>Punya 2 utilitas</td><td class="text-end">10× dadu</td></tr>
+    <tr><td>Nilai gadai</td><td class="text-end">Rp75.000</td></tr></tbody></table>`;
+  } else {
+    h += `<div class="fw-bold fs-5 text-center">${s.name}</div>`;
+    if (s.type === 'tax') h += `<div class="text-center">Bayar ${fmt(s.amount)} ke bank.</div>`;
+    if (s.type === 'go') h += `<div class="text-center">Setiap melewati MULAI, terima Rp200.000.</div>`;
+    if (s.type === 'gotojail') h += `<div class="text-center">Langsung masuk penjara.</div>`;
+    if (s.type === 'jail') h += `<div class="text-center">Hanya berkunjung, kecuali Anda dipenjara.</div>`;
+    if (s.type === 'free') h += `<div class="text-center">Istirahat. Tidak ada efek.</div>`;
+    if (s.type === 'chance' || s.type === 'chest') h += `<div class="text-center">Ambil sebuah kartu.</div>`;
+  }
+  if (s.owner) {
+    h += `<div class="small">Pemilik: <b style="color:${s.owner.color}">${esc(s.owner.name)}</b>${s.mort ? ' (digadaikan)' : ''}${s.type === 'prop' && s.houses ? ' — ' + (s.houses === 5 ? 'Hotel' : s.houses + ' rumah') : ''}</div>`;
+  }
+  return h;
+}
+function renderInfo() { if (G && G.sel != null) $('#info').innerHTML = infoHtml(G.sel); }
+function renderPlayers() {
+  $('#players').innerHTML = G.players.map(p => {
+    const chips = SQ.filter(s => s.owner === p).map(s =>
+      `<span class="chip ${s.mort ? 'm' : ''}" style="background:${s.type === 'prop' ? GC[s.group] : '#666'}" title="${esc(s.name)}${s.mort ? ' (gadai)' : ''}"></span>`).join('');
+    const st = p.bankrupt ? 'Bangkrut' : p.jail ? '🔒 Di penjara' : '';
+    return `<div class="pl ${p === G.current ? 'active' : ''} ${p.bankrupt ? 'dead' : ''}">
+      <span class="dot" style="background:${p.color}"></span><b>${esc(p.name)}</b>${p.ai ? ' 🤖' : ''}
+      <span class="float-end fw-bold">${fmt(p.cash)}</span>
+      <div class="small text-muted">${st}${p.jailCards.length ? ' 🎫 Kartu bebas ×' + p.jailCards.length : ''}</div>
+      <div>${chips}</div></div>`;
+  }).join('');
+}
+function updateButtons() {
+  const p = G && G.current, human = p && !p.ai && !G.over;
+  const pre = G && G.phase === 'pre' && human, post = G && G.phase === 'post' && human;
+  $('#btnRoll').disabled = !pre;
+  $('#btnRoll').textContent = p && p.jail ? '🎲 Coba Dadu Kembar' : '🎲 Lempar Dadu';
+  $('#btnPay').classList.toggle('d-none', !(pre && p.jail));
+  $('#btnPay').disabled = !(pre && p.jail && p.cash >= 50);
+  $('#btnCard').classList.toggle('d-none', !(pre && p.jail && p.jailCards.length));
+  $('#btnEnd').disabled = !post;
+  $('#btnProps').disabled = !(pre || post);
+  let t = '';
+  if (G && p && !G.over) {
+    if (p.ai) t = `🤖 ${esc(p.name)} sedang bermain…`;
+    else if (pre) t = `Giliran ${esc(p.name)} — ${p.jail ? 'Anda di penjara' : 'lempar dadu!'}`;
+    else if (post) t = `${esc(p.name)} — kelola properti atau akhiri giliran.`;
+    else t = `${esc(p.name)} sedang bergerak…`;
+  }
+  $('#status').innerHTML = t || 'Siapkan permainan…';
+}
+function setPhase(ph) { G.phase = ph; updateButtons(); }
+function refresh() { draw(); if (G) { renderPlayers(); renderInfo(); updateButtons(); } }
+
+/* ================= Dialog ================= */
+const dlgEl = $('#dlg'); const dlg = new bootstrap.Modal(dlgEl, {backdrop:'static', keyboard:false});
+function dialog({title, html, buttons}) {
+  return new Promise(res => {
+    $('#dlgTitle').innerHTML = title; $('#dlgBody').innerHTML = html;
+    const f = $('#dlgFoot'); f.innerHTML = ''; const btns = [];
+    buttons.forEach(b => {
+      const btn = document.createElement('button');
+      btn.className = 'btn ' + (b.cls || 'btn-primary'); btn.textContent = b.label; btn.disabled = true;
+      btn.onclick = () => { dlgEl.addEventListener('hidden.bs.modal', () => res(b.value), {once:true}); dlg.hide(); };
+      f.appendChild(btn); btns.push([btn, b]);
+    });
+    dlgEl.addEventListener('shown.bs.modal', () => btns.forEach(([btn, b]) => { btn.disabled = !!b.disabled; }), {once:true});
+    dlg.show();
+  });
+}
+
+/* ================= Aturan ================= */
+function rentOf(s, dice, opts = {}) {
+  if (s.type === 'prop') {
+    let r = s.houses > 0 ? s.rent[s.houses] : s.rent[0];
+    if (s.houses === 0 && ownsAll(s.owner, s.group)) r *= 2;
+    return r;
+  }
+  if (s.type === 'rail') return 25 * Math.pow(2, countOwned(s.owner, 'rail') - 1);
+  const n = countOwned(s.owner, 'util');
+  return dice * (opts.utilTen || n === 2 ? 10 : 4);
+}
+const canBuild = (p, s) => s.type === 'prop' && s.owner === p && ownsAll(p, s.group) && groupOf(s.group).every(x => !x.mort)
+  && s.houses < 5 && p.cash >= GH[s.group] && s.houses <= Math.min(...groupOf(s.group).map(x => x.houses));
+const canSell = (p, s) => s.type === 'prop' && s.owner === p && s.houses > 0 && s.houses >= Math.max(...groupOf(s.group).map(x => x.houses));
+const canMortgage = (p, s) => s.owner === p && !s.mort && (s.type !== 'prop' || groupOf(s.group).every(x => x.houses === 0));
+const unmortCost = s => Math.ceil(s.price / 2 * 1.1);
+const canUnmortgage = (p, s) => s.owner === p && s.mort && p.cash >= unmortCost(s);
+function build(p, s) { p.cash -= GH[s.group]; s.houses++; log(`${esc(p.name)} membangun ${s.houses === 5 ? 'hotel' : 'rumah'} di ${s.name}.`); }
+
+function raiseFunds(p, need) {
+  while (p.cash < need) {
+    const h = SQ.filter(s => s.owner === p && s.houses > 0).sort((a, b) => b.houses - a.houses)[0];
+    if (!h) break;
+    h.houses--; p.cash += GH[h.group] / 2;
+    log(`${esc(p.name)} menjual bangunan di ${h.name} (+${fmt(GH[h.group] / 2)}).`);
+  }
+  while (p.cash < need) {
+    const m = SQ.filter(s => s.owner === p && !s.mort).sort((a, b) => a.price - b.price)[0];
+    if (!m) break;
+    m.mort = true; p.cash += m.price / 2;
+    log(`${esc(p.name)} menggadaikan ${m.name} (+${fmt(m.price / 2)}).`);
+  }
+}
+
+async function charge(p, amt, to) {
+  if (p.cash < amt) raiseFunds(p, amt);
+  if (p.cash >= amt) {
+    p.cash -= amt; if (to) to.cash += amt; refresh(); return true;
+  }
+  await goBankrupt(p, to); return false;
+}
+
+async function goBankrupt(p, to) {
+  log(`💥 <b>${esc(p.name)} bangkrut!</b>${to ? ' Aset diambil alih ' + esc(to.name) + '.' : ' Aset kembali ke bank.'}`);
+  SQ.forEach(s => {
+    if (s.owner === p) { s.houses = 0; if (to) s.owner = to; else { s.owner = null; s.mort = false; } }
+  });
+  if (to) to.cash += Math.max(0, p.cash);
+  p.cash = 0; p.bankrupt = true;
+  p.jailCards.forEach(c => c.held = false); p.jailCards = [];
+  refresh();
+  const alive = G.players.filter(x => !x.bankrupt);
+  if (alive.length <= 1 || (G.humans > 0 && alive.every(x => x.ai))) {
+    G.over = true; refresh();
+    const w = alive.sort((a, b) => worth(b) - worth(a))[0];
+    await dialog({title:'🏆 Permainan Selesai', html:`<p class="fs-5 text-center mb-1"><b style="color:${w.color}">${esc(w.name)}</b> menang!</p><p class="text-center text-muted mb-0">Total kekayaan: ${fmt(worth(w))}</p>`,
+      buttons:[{label:'Main Lagi', value:1, cls:'btn-success'}]});
+    location.reload();
+    throw 'GAMEOVER';
+  }
+  if (!p.ai) await dialog({title:'💥 Anda bangkrut', html:`<p>${esc(p.name)} tidak mampu membayar dan keluar dari permainan.</p>`, buttons:[{label:'OK', value:1}]});
+}
+
+async function move(p, n) {
+  for (let i = 0; i < n; i++) {
+    p.pos = (p.pos + 1) % 40;
+    if (p.pos === 0) { p.cash += 200; log(`${esc(p.name)} melewati MULAI, terima Rp200.000.`); }
+    refresh(); await sleep(140);
+  }
+}
+async function moveTo(p, t) { let g = 0; while (p.pos !== t && g++ < 40) await move(p, 1); }
+
+async function sendToJail(p) {
+  p.pos = 10; p.jail = true; p.jailTurns = 0;
+  log(`🔒 ${esc(p.name)} masuk penjara!`); refresh(); await sleep(500);
+}
+function useJailCard(p) {
+  const c = p.jailCards.pop(); if (c) c.held = false;
+  p.jail = false; p.jailTurns = 0; log(`${esc(p.name)} memakai kartu bebas dari penjara.`);
+}
+
+async function offerBuy(p, s) {
+  let buy;
+  if (p.ai) { buy = p.cash - s.price >= 150; await sleep(500); }
+  else {
+    const can = p.cash >= s.price;
+    buy = await dialog({
+      title: `${esc(s.name)} belum dimiliki`,
+      html: infoHtml(SQ.indexOf(s)) + (can ? '' : '<div class="text-danger mt-2">Uang Anda tidak cukup untuk membeli.</div>'),
+      buttons: can ? [{label:`Beli ${fmt(s.price)}`, value:true, cls:'btn-success'}, {label:'Lewati', value:false, cls:'btn-outline-secondary'}] : [{label:'OK', value:false}]
+    });
+  }
+  if (buy) { p.cash -= s.price; s.owner = p; log(`${esc(p.name)} membeli <b>${s.name}</b> seharga ${fmt(s.price)}.`); }
+  else log(`${esc(p.name)} tidak membeli ${s.name}.`);
+  refresh();
+}
+
+// Setelah ronde ke-25, sewa naik 15% tiap ronde agar permainan pasti berakhir.
+const inflation = () => 1 + Math.max(0, G.round - 25) * 0.15;
+
+async function landOn(p, dice, opts = {}) {
+  const s = SQ[p.pos]; G.sel = p.pos; refresh();
+  switch (s.type) {
+    case 'prop': case 'rail': case 'util':
+      if (!s.owner) await offerBuy(p, s);
+      else if (s.owner !== p) {
+        if (s.mort) log(`${s.name} digadaikan, tidak ada sewa.`);
+        else {
+          let r = rentOf(s, dice, opts); if (opts.rentMult) r *= opts.rentMult;
+          r = Math.round(r * inflation());
+          log(`${esc(p.name)} membayar sewa ${fmt(r)} kepada ${esc(s.owner.name)} di ${s.name}.`);
+          await charge(p, r, s.owner);
+        }
+      }
+      break;
+    case 'tax': log(`${esc(p.name)} membayar ${s.name} ${fmt(s.amount)}.`); await charge(p, s.amount, null); break;
+    case 'chance': case 'chest': await drawCard(p, s.type); break;
+    case 'gotojail': await sendToJail(p); break;
+  }
+}
+
+/* ================= Kartu ================= */
+async function repairs(p, ph, pH) {
+  let cost = 0;
+  SQ.forEach(s => { if (s.owner === p && s.type === 'prop') cost += s.houses === 5 ? pH : s.houses * ph; });
+  if (cost > 0) { log(`${esc(p.name)} membayar biaya perbaikan ${fmt(cost)}.`); await charge(p, cost, null); }
+  else log('Tidak punya bangunan, tidak ada biaya perbaikan.');
+}
+function buildDecks() {
+  const mk = (text, f) => ({text, f, held:false});
+  const go = async (p, t) => { await moveTo(p, t); await landOn(p, G.lastDice || 7); };
+  const nearest = (p, list) => list.find(x => x > p.pos) ?? list[0];
+  const gain = n => async p => { p.cash += n; };
+  const lose = n => async p => { await charge(p, n, null); };
+  const jailFree = () => { const c = mk('Bebas dari penjara! Simpan kartu ini sampai dibutuhkan.', null); c.f = async p => { c.held = true; p.jailCards.push(c); }; return c; };
+  const others = p => G.players.filter(q => q !== p && !q.bankrupt);
+
+  G.chance = shuffle([
+    mk('Maju ke MULAI. Terima Rp200.000.', p => go(p, 0)),
+    mk('Maju ke Bundaran HI.', p => go(p, 39)),
+    mk('Maju ke Makassar. Jika melewati MULAI, terima Rp200.000.', p => go(p, 21)),
+    mk('Maju ke Yogyakarta. Jika melewati MULAI, terima Rp200.000.', p => go(p, 13)),
+    mk('Maju ke stasiun terdekat. Jika dimiliki pemain lain, bayar sewa 2×.', async p => { await moveTo(p, nearest(p, [5,15,25,35])); await landOn(p, G.lastDice || 7, {rentMult:2}); }),
+    mk('Maju ke utilitas terdekat. Jika dimiliki, bayar 10× hasil dadu.', async p => { await moveTo(p, nearest(p, [12,28])); await landOn(p, G.lastDice || 7, {utilTen:true}); }),
+    mk('Bank membayar dividen Rp50.000.', gain(50)),
+    mk('Mundur 3 petak.', async p => { p.pos = (p.pos + 37) % 40; refresh(); await sleep(300); await landOn(p, G.lastDice || 7); }),
+    mk('Masuk penjara! Langsung tanpa melewati MULAI.', p => sendToJail(p)),
+    mk('Perbaiki rumah Anda: Rp25.000 per rumah, Rp100.000 per hotel.', p => repairs(p, 25, 100)),
+    mk('Denda melanggar lalu lintas Rp15.000.', lose(15)),
+    mk('Anda terpilih jadi ketua RT. Bayar Rp50.000 ke setiap pemain.', async p => { for (const q of others(p)) { if (p.bankrupt) return; await charge(p, 50, q); } }),
+    mk('Pinjaman bangunan jatuh tempo. Terima Rp150.000.', gain(150)),
+    mk('Juara lomba makan kerupuk! Terima Rp100.000.', gain(100)),
+    jailFree(),
+  ]);
+  G.chest = shuffle([
+    mk('Kesalahan bank menguntungkan Anda. Terima Rp200.000.', gain(200)),
+    mk('Biaya dokter. Bayar Rp50.000.', lose(50)),
+    mk('Hasil jual saham. Terima Rp50.000.', gain(50)),
+    jailFree(),
+    mk('Masuk penjara! Langsung tanpa melewati MULAI.', p => sendToJail(p)),
+    mk('Hari ulang tahun Anda. Terima Rp10.000 dari setiap pemain.', async p => { for (const q of others(p)) await charge(q, 10, p); }),
+    mk('Asuransi jatuh tempo. Terima Rp100.000.', gain(100)),
+    mk('Biaya rumah sakit. Bayar Rp100.000.', lose(100)),
+    mk('Biaya sekolah. Bayar Rp50.000.', lose(50)),
+    mk('Biaya konsultasi. Terima Rp25.000.', gain(25)),
+    mk('Perbaikan jalan: Rp40.000 per rumah, Rp115.000 per hotel.', p => repairs(p, 40, 115)),
+    mk('Juara kedua lomba kecantikan. Terima Rp10.000.', gain(10)),
+    mk('Warisan keluarga. Terima Rp100.000.', gain(100)),
+    mk('Maju ke MULAI. Terima Rp200.000.', p => go(p, 0)),
+    mk('Pengembalian pajak. Terima Rp20.000.', gain(20)),
+    mk('Donasi untuk panti asuhan. Bayar Rp30.000.', lose(30)),
+  ]);
+}
+async function drawCard(p, kind) {
+  const deck = kind === 'chance' ? G.chance : G.chest;
+  let card;
+  for (let k = 0; k < deck.length; k++) { card = deck.shift(); deck.push(card); if (!card.held) break; }
+  const title = kind === 'chance' ? '❓ Kesempatan' : '🎁 Dana Umum';
+  log(`${title} — ${esc(p.name)}: ${card.text}`);
+  if (p.ai) await sleep(900);
+  else await dialog({title, html:`<p class="fs-5 text-center my-3">${card.text}</p>`, buttons:[{label:'OK', value:1}]});
+  await card.f(p);
+  refresh();
+}
+
+/* ================= AI ================= */
+function aiManage(p) {
+  SQ.filter(s => s.owner === p && s.mort).sort((a, b) => b.price - a.price).forEach(s => {
+    if (p.cash > unmortCost(s) + 400) { p.cash -= unmortCost(s); s.mort = false; log(`${esc(p.name)} menebus ${s.name}.`); }
+  });
+  let guard = 0;
+  while (guard++ < 30) {
+    const c = SQ.filter(s => canBuild(p, s) && p.cash - GH[s.group] >= 300).sort((a, b) => b.price - a.price)[0];
+    if (!c) break; build(p, c);
+  }
+}
+function aiPre(p) {
+  if (p.jail) { if (p.jailCards.length) return 'card'; if (p.cash >= 400) return 'pay'; }
+  return 'roll';
+}
+
+/* ================= Dadu & giliran ================= */
+async function rollDice() {
+  for (let i = 0; i < 9; i++) { G.dice = [r6(), r6()]; draw(); await sleep(70); }
+  const d = [r6(), r6()]; G.dice = d; G.lastDice = d[0] + d[1]; draw(); await sleep(250); return d;
+}
+
+async function playTurn(p) {
+  G.current = p; G.sel = p.pos; let doubles = 0; refresh();
+  log(`<b>── Ronde ${G.round} · Giliran ${esc(p.name)} ──</b>`);
+  while (true) {
+    if (p.bankrupt) return;
+    let a;
+    if (p.ai) { setPhase('busy'); await sleep(600); aiManage(p); refresh(); a = aiPre(p); }
+    else { setPhase('pre'); a = await waitFor(); }
+    setPhase('busy');
+    if (p.jail) {
+      if (a === 'pay') {
+        log(`${esc(p.name)} membayar denda Rp50.000 untuk keluar penjara.`);
+        if (!(await charge(p, 50, null))) return;
+        p.jail = false; p.jailTurns = 0;
+      } else if (a === 'card') useJailCard(p);
+    }
+    const [d1, d2] = await rollDice(); const isD = d1 === d2, total = d1 + d2;
+    log(`${esc(p.name)} melempar ${d1} + ${d2} = ${total}${isD ? ' (kembar!)' : ''}`);
+    let extra = false;
+    if (p.jail) {
+      if (isD) { log('Dadu kembar! Bebas dari penjara.'); p.jail = false; p.jailTurns = 0; }
+      else {
+        p.jailTurns++;
+        if (p.jailTurns >= 3) {
+          log('Sudah 3 giliran di penjara. Wajib bayar denda Rp50.000.');
+          if (!(await charge(p, 50, null))) return;
+          p.jail = false; p.jailTurns = 0;
+        } else { log(`${esc(p.name)} tetap di penjara.`); break; }
+      }
+      await move(p, total); await landOn(p, total);
+      if (p.bankrupt) return;
+    } else {
+      if (isD) { doubles++; extra = true; } else doubles = 0;
+      if (doubles >= 3) { log('Tiga kali kembar berturut-turut! Masuk penjara.'); await sendToJail(p); break; }
+      await move(p, total); await landOn(p, total);
+      if (p.bankrupt) return;
+      if (p.jail) extra = false;
+    }
+    if (!extra) break;
+    log(`${esc(p.name)} mendapat giliran tambahan.`);
+  }
+  if (p.bankrupt) return;
+  if (p.ai) { await sleep(400); aiManage(p); refresh(); }
+  else { setPhase('post'); await waitFor(); }
+  setPhase('busy');
+}
+
+async function gameLoop() {
+  try {
+    while (!G.over) {
+      const p = G.players[G.turn];
+      if (!p.bankrupt) await playTurn(p);
+      G.turn = (G.turn + 1) % G.players.length;
+      if (G.turn === 0) {
+        G.round++;
+        if (G.round > 25 && (G.round - 25) % 5 === 1) log(`📈 <b>Inflasi!</b> Ronde ${G.round}: semua sewa naik ${Math.round((inflation() - 1) * 100)}%.`);
+      }
+    }
+  } catch (e) { if (e !== 'GAMEOVER') { console.error(e); throw e; } }
+}
+
+/* ================= Manajer properti ================= */
+function renderProps() {
+  const p = G.current; if (!p) return;
+  $('#propWho').textContent = '— ' + p.name; $('#propCash').textContent = fmt(p.cash);
+  const mine = SQ.map((s, i) => ({s, i})).filter(x => x.s.owner === p);
+  if (!mine.length) { $('#propBody').innerHTML = '<p class="text-muted mb-0">Anda belum memiliki properti.</p>'; return; }
+  const order = ['brown','lightblue','pink','orange','red','yellow','green','darkblue'];
+  mine.sort((a, b) => (order.indexOf(a.s.group) + (a.s.group ? 0 : 99)) - (order.indexOf(b.s.group) + (b.s.group ? 0 : 99)) || a.i - b.i);
+  $('#propBody').innerHTML = `<table class="table table-sm align-middle"><tbody>` + mine.map(({s, i}) => {
+    const col = s.type === 'prop' ? GC[s.group] : '#777';
+    let btns = '';
+    if (s.type === 'prop') {
+      btns += `<button class="btn btn-sm btn-success me-1" data-act="build" data-i="${i}" ${canBuild(p, s) ? '' : 'disabled'}>+ ${fmt(GH[s.group])}</button>`;
+      btns += `<button class="btn btn-sm btn-outline-danger me-1" data-act="sell" data-i="${i}" ${canSell(p, s) ? '' : 'disabled'}>− Jual</button>`;
+    }
+    btns += s.mort
+      ? `<button class="btn btn-sm btn-warning" data-act="unmort" data-i="${i}" ${canUnmortgage(p, s) ? '' : 'disabled'}>Tebus ${fmt(unmortCost(s))}</button>`
+      : `<button class="btn btn-sm btn-outline-secondary" data-act="mort" data-i="${i}" ${canMortgage(p, s) ? '' : 'disabled'}>Gadai +${fmt(s.price / 2)}</button>`;
+    const hs = s.type === 'prop' ? (s.houses === 5 ? '🏨 Hotel' : s.houses ? '🏠'.repeat(s.houses) : '—') : '';
+    return `<tr><td><span class="chip" style="background:${col}"></span> ${s.name}${s.mort ? ' <span class="badge text-bg-secondary">Gadai</span>' : ''}</td><td>${hs}</td><td class="text-end">${btns}</td></tr>`;
+  }).join('') + `</tbody></table><div class="small text-muted">Bangun rumah harus merata di satu warna, dan hanya bila Anda memiliki seluruh warna tersebut. Rumah dijual setengah harga.</div>`;
+}
+$('#propBody').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b || !G) return;
+  const p = G.current, s = SQ[+b.dataset.i], a = b.dataset.act;
+  if (a === 'build' && canBuild(p, s)) build(p, s);
+  else if (a === 'sell' && canSell(p, s)) { s.houses--; p.cash += GH[s.group] / 2; log(`${esc(p.name)} menjual bangunan di ${s.name}.`); }
+  else if (a === 'mort' && canMortgage(p, s)) { s.mort = true; p.cash += s.price / 2; log(`${esc(p.name)} menggadaikan ${s.name}.`); }
+  else if (a === 'unmort' && canUnmortgage(p, s)) { p.cash -= unmortCost(s); s.mort = false; log(`${esc(p.name)} menebus ${s.name}.`); }
+  renderProps(); refresh();
+});
+
+/* ================= Setup & event ================= */
+function buildSetup() {
+  const defs = [['Kamu','h'], ['Budi','b'], ['Sari','b'], ['Dewi','n']];
+  $('#setupRows').innerHTML = defs.map((d, i) => `
+    <div class="input-group mb-2">
+      <span class="input-group-text"><span class="dot m-0" style="background:${PCOL[i]}"></span></span>
+      <input class="form-control" id="pn${i}" value="${d[0]}" maxlength="14">
+      <select class="form-select" id="pm${i}" style="max-width:150px">
+        <option value="h" ${d[1] === 'h' ? 'selected' : ''}>Manusia</option>
+        <option value="b" ${d[1] === 'b' ? 'selected' : ''}>Komputer</option>
+        <option value="n" ${d[1] === 'n' ? 'selected' : ''}>Tidak ikut</option>
+      </select>
+    </div>`).join('');
+}
+function newGame(cfg) {
+  resetBoard();
+  G = {
+    players: cfg.map((c, i) => ({id:i, name:c.name, ai:c.ai, color:PCOL[c.slot], cash:1500, pos:0, jail:false, jailTurns:0, jailCards:[], bankrupt:false})),
+    turn:0, round:1, phase:'busy', dice:[1, 1], lastDice:7, sel:null, over:false, current:null,
+    humans: cfg.filter(c => !c.ai).length
+  };
+  G.players.forEach((p, i) => p.color = PCOL[cfg[i].slot]);
+  buildDecks();
+}
+
+$('#btnRoll').onclick = () => act('roll');
+$('#btnPay').onclick = () => act('pay');
+$('#btnCard').onclick = () => act('card');
+$('#btnEnd').onclick = () => act('end');
+$('#btnProps').onclick = () => { renderProps(); bootstrap.Modal.getOrCreateInstance('#propModal').show(); };
+$('#propModal').addEventListener('hidden.bs.modal', () => { if (G) refresh(); });
+$('#btnNew').onclick = () => { if (confirm('Mulai permainan baru? Progres saat ini akan hilang.')) location.reload(); };
+
+canvas.addEventListener('click', e => {
+  if (!G) return;
+  const b = canvas.getBoundingClientRect(), k = S / b.width;
+  const x = (e.clientX - b.left) * k, y = (e.clientY - b.top) * k;
+  for (let i = 0; i < 40; i++) {
+    const r = rectOf(i);
+    if (x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h) { G.sel = i; refresh(); return; }
+  }
+});
+
+$('#btnStart').onclick = () => {
+  const cfg = [];
+  for (let i = 0; i < 4; i++) {
+    const m = $('#pm' + i).value; if (m === 'n') continue;
+    cfg.push({name:($('#pn' + i).value.trim() || 'Pemain ' + (i + 1)), ai:m === 'b', slot:i});
+  }
+  if (cfg.length < 2) { $('#setupErr').textContent = 'Minimal 2 pemain.'; return; }
+  const setupEl = $('#setupModal');
+  setupEl.addEventListener('hidden.bs.modal', () => {
+    newGame(cfg); G.current = G.players[0]; refresh();
+    log('Selamat bermain! Semua pemain mulai dengan Rp1.500.000.');
+    gameLoop();
+  }, {once:true});
+  bootstrap.Modal.getInstance(setupEl).hide();
+};
+
+draw();
+buildSetup();
+new bootstrap.Modal('#setupModal', {backdrop:'static', keyboard:false}).show();
+})();
+</script>
+</body>
+</html>
